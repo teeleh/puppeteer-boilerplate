@@ -1,0 +1,5 @@
+runtime: javascript
+startCommand: node index.js
+buildCommand: npm install puppeteer && npm install
+port: 8080
+memory: 1024mb
