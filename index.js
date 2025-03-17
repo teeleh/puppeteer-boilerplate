@@ -1,57 +1,72 @@
 const express = require("express");
-const multer = require("multer");
-const puppeteer = require("puppeteer");
 
-const app = express();
-const upload = multer(); // Middleware for parsing form data
+import puppeteer from "puppeteer-core";
+import chromium from "@sparticuz/chromium";
 
-// Serve HTML form
-app.get("/", (req, res) => {
-    res.send(`
-    <!DOCTYPE html>
-    <html>
-    <head><title>Website Screenshot</title></head>
-    <body>
-        <h1>Generate a Screenshot</h1>
-        <form action="/screenshot" method="post" enctype="multipart/form-data">
-            <input type="text" name="url" placeholder="https://example.com" required>
-            <button type="submit">Generate Screenshot</button>
-        </form>
-    </body>
-    </html>
-  `);
-});
-
-// Handle screenshot generation
-app.post("/screenshot", upload.none(), async (req, res) => {
-    const url = req.body.url;
-    if (!/^https?:\/\/.+$/.test(url)) return res.status(400).send("Invalid URL.");
+export default defineComponent({
+  async run({ steps, $ }) {
+    // Launch a headless browser
+    const browser = await puppeteer.launch({
+      args: chromium.args,
+      defaultViewport: chromium.defaultViewport,
+      executablePath: await chromium.executablePath(),
+      headless: chromium.headless,
+    });
 
     try {
-        const browser = await puppeteer.launch();
-        const page = await browser.newPage();
-        await page.goto(url, { timeout: 60000 });
-        const screenshotBuffer = await page.screenshot({ type: "png" });
-        await browser.close();
-
-        // Embed screenshot as base64 in HTML
-        res.send(`
-      <!DOCTYPE html>
-      <html>
-      <head><title>Screenshot Result</title></head>
-      <body>
-          <h1>Screenshot of ${url}</h1>
-          <img src="data:image/png;base64,${screenshotBuffer.toString("base64")}" style="max-width:100%;height:auto;">
-          <br><a href="/">Back to form</a>
-      </body>
-      </html>
-    `);
+      // Open a new page
+      const page = await browser.newPage();
+      
+      // Set user agent to avoid bot detection
+      await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
+      
+      // Navigate to Finst.com USDC page
+      await page.goto('https://app.finst.com/assets/USDC?chartType=line&chartDuration=P1W', {
+        waitUntil: 'networkidle2',
+        timeout: 30000
+      });
+      
+      // Wait for the rate element to appear (adjust timeout as needed)
+      await page.waitForSelector('.gtekqm5J', { timeout: 15000 });
+      
+      // Extract the rate text
+      const rateText = await page.evaluate(() => {
+        const element = document.querySelector('.gtekqm5J');
+        return element ? element.textContent : null;
+      });
+      
+      // Process the rate text
+      if (rateText) {
+        // Remove euro symbol and non-breaking spaces
+        let cleanRate = rateText.replace(/€/g, '').replace(/\u00A0/g, '').trim();
+        
+        // Replace comma with period
+        cleanRate = cleanRate.replace(',', '.');
+        
+        // Convert to number
+        const numericRate = parseFloat(cleanRate);
+        
+        // Return the formatted result
+        return {
+          success: true,
+          rate: numericRate,
+          rateFormatted: numericRate.toFixed(5),
+          source: "Finst.com",
+          timestamp: new Date().toISOString()
+        };
+      } else {
+        throw new Error('Rate element not found on page');
+      }
     } catch (error) {
-        console.error("Screenshot error:", error);
-        res.status(500).send("Failed to generate screenshot.");
+      console.error('Scraping error:', error);
+      return {
+        success: false,
+        error: error.message,
+        timestamp: new Date().toISOString()
+      };
+    } finally {
+      // Always close the browser
+      await browser.close();
     }
+  }
 });
-
-// Start server
-const PORT = process.env.PORT || 8080;
-app.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));
